@@ -13,15 +13,14 @@ def whatsapp_webhook():
 
     resp = MessagingResponse()
     num_media = int(request.values.get("NumMedia", 0))
-    body      = request.values.get("Body", "").strip().lower()
+    body      = request.values.get("Body", "").strip()
 
     if num_media > 0:
-        # OCR flow
         media_url = request.values["MediaUrl0"]
         sid, token = os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"]
         try:
-            r = requests.get(media_url, auth=(sid, token)); r.raise_for_status()
-            img = vision.Image(content=r.content)
+            twr = requests.get(media_url, auth=(sid, token)); twr.raise_for_status()
+            img = vision.Image(content=twr.content)
             anns = vision_client.text_detection(image=img).text_annotations
             if anns:
                 resp.message(f"📝 Here’s what I read:\n\n{anns[0].description}")
@@ -30,7 +29,7 @@ def whatsapp_webhook():
         except Exception as e:
             resp.message(f"⚠️ Image processing error: {e}")
 
-    elif body in ("hi","hello","hey","hola","yo"):
+    elif body.lower() in ["hi","hello","hey","hola","yo"]:
         resp.message("👋 Hey there! Send me an invoice image and I'll read it for you.")
 
     elif body:
