@@ -1,80 +1,75 @@
-import os
-import logging
+# main.py
 
+import os
+import requests
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
-import requests
 from google.cloud import vision
 
-# ————— CONFIGURE LOGGING —————
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+from model import parse_invoice_text  # ← separate parser
 
-# ————— READ CREDS FROM ENV —————
-# (in Render: Add env-vars TWILIO_ACCOUNT_SID & TWILIO_AUTH_TOKEN)
-TWILIO_SID   = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+# ─── CONFIG ──────────────────────────────────────────────────────────
 
-# GOOGLE_APPLICATION_CREDENTIALS should already point at your mounted JSON
+# Twilio creds (set these in Render as ENV vars)
+TWILIO_ACCOUNT_SID = os.environ["TWILIO_ACCOUNT_SID"]
+TWILIO_AUTH_TOKEN  = os.environ["TWILIO_AUTH_TOKEN"]
+
+# Google Vision creds (mount JSON & set this path in Render ENV)
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.environ[
+    "GOOGLE_APPLICATION_CREDENTIALS"
+]
+
+vision_client = vision.ImageAnnotatorClient()
+
+# ─── FLASK / WHATSAPP ────────────────────────────────────────────────
 
 app = Flask(__name__)
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_reply():
-    resp = MessagingResponse()
+    resp  = MessagingResponse()
     reply = resp.message()
 
-    try:
-        incoming = request.values.get("Body", "").strip().lower()
-        num_media = int(request.values.get("NumMedia", 0))
-        logging.info(f"Received msg='{incoming}', NumMedia={num_media}")
+    num_media = int(request.values.get("NumMedia", 0))
+    if num_media > 0:
+        # Download image
+        url  = request.values["MediaUrl0"]
+        ctype= request.values["MediaContentType0"]
+        ext  = ctype.split("/")[-1]
+        fname= f"invoice.{ext}"
+        data = requests.get(url).content
+        with open(fname, "wb") as f:
+            f.write(data)
 
-        if num_media > 0:
-            # 1) Pull down the image with Twilio credentials
-            media_url  = request.values.get("MediaUrl0")
-            media_type = request.values.get("MediaContentType0", "")
-            ext        = media_type.split("/")[-1] or "jpg"
-            filename   = f"invoice.{ext}"
-
-            logging.info(f"Fetching media at {media_url}")
-            r = requests.get(media_url, auth=(TWILIO_SID, TWILIO_TOKEN))
-            if r.status_code != 200:
-                logging.error(f"Media fetch failed: {r.status_code}")
-                reply.body("Error fetching your invoice image.")
-                return str(resp), 200
-
-            content = r.content
-            logging.info(f"Downloaded {len(content)} bytes, saving to {filename}")
-            with open(filename, "wb") as f:
-                f.write(content)
-
-            # 2) OCR it via Vision
-            client   = vision.ImageAnnotatorClient()
-            image    = vision.Image(content=content)
-            ocr_resp = client.text_detection(image=image)
-
-            if ocr_resp.error.message:
-                logging.error(f"OCR failed: {ocr_resp.error.message}")
-                reply.body(f"Error processing invoice: {ocr_resp.error.message}")
-            else:
-                texts = ocr_resp.text_annotations
-                if texts:
-                    full_text = texts[0].description
-                    reply.body("Here’s your invoice text:\n\n" + full_text)
-                else:
-                    reply.body("Sorry, I couldn’t read any text from your invoice.")
-
-        elif "invoice" in incoming:
-            reply.body("Sure—please upload your invoice image and I’ll extract the text for you.")
+        # OCR
+        img = vision.Image(content=data)
+        result = vision_client.text_detection(image=img)
+        if result.error.code:
+            reply.body(f"Error: {result.error.message}")
         else:
-            reply.body("Hi there! 👋 Send ‘invoice’ to get started or just say hi!")
-
-    except Exception:
-        logging.exception("Unexpected error in /whatsapp")
-        reply.body("Oops—something went wrong. Please try again in a moment.")
+            raw = result.text_annotations and result.text_annotations[0].description
+            if not raw:
+                reply.body("Sorry, I couldn't read any text from your invoice.")
+            else:
+                inv = parse_invoice_text(raw)
+                reply.body(
+                    f"✅ Parsed invoice:\n"
+                    f"No: {inv.invoice_no}\n"
+                    f"Date: {inv.date}\n"
+                    f"Vendor: {inv.vendor}\n"
+                    f"Total: {inv.total:.2f}"
+                )
+    else:
+        txt = request.values.get("Body", "").strip().lower()
+        if "invoice" in txt:
+            reply.body("Please send me your invoice image or PDF.")
+        elif txt in ("hi","hello"):
+            reply.body("👋 Send an invoice and I'll pull out the key details.")
+        else:
+            reply.body("Send 'invoice' to get started.")
 
     return str(resp), 200
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 3000))
-    logging.info(f"Starting on port {port}")
+    port = int(os.environ.get("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
