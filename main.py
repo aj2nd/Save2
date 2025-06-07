@@ -1,80 +1,77 @@
-import os, sys, io, re, requests
+import os, sys, requests
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 from google.cloud import vision
-import dateparser
 
+# Initialize Flask app and Google Vision client
 app = Flask(__name__)
 vision_client = vision.ImageAnnotatorClient()
 
-def extract_invoice_data(text):
-    lines = text.split("\n")
-    result = {}
-
-    for line in lines:
-        l = line.lower()
-
-        if 'invoice' in l and 'no' in l:
-            result['Invoice No'] = line.strip()
-
-        elif any(word in l for word in ['gst', 'tax']) and '₹' in l:
-            result['GST'] = line.strip()
-
-        elif 'total' in l or 'amount' in l:
-            amt = re.findall(r'₹\s?[\d,]+', line)
-            if amt:
-                result['Total Amount'] = amt[0].strip()
-
-        elif not result.get('Date'):
-            parsed_date = dateparser.parse(line, settings={"PREFER_DATES_FROM": "past"})
-            if parsed_date:
-                result['Date'] = parsed_date.strftime("%Y-%m-%d")
-
-    return result
-
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
-    print("📥 Payload:", request.values.to_dict(), file=sys.stderr)
-    sys.stderr.flush()
+    try:
+        # Logging incoming payload
+        payload = request.values.to_dict()
+        print("📥 Incoming Payload:", payload, file=sys.stderr)
+        sys.stderr.flush()
 
-    resp = MessagingResponse()
-    num_media = int(request.values.get("NumMedia", 0))
-    body = request.values.get("Body", "").strip()
+        resp = MessagingResponse()
+        num_media = int(request.values.get("NumMedia", 0))
+        body = request.values.get("Body", "").strip()
 
-    if num_media > 0:
-        media_url = request.values["MediaUrl0"]
-        sid, token = os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"]
+        # Case 1: Image received
+        if num_media > 0:
+            media_url = request.values["MediaUrl0"]
+            print(f"📸 Media received: {media_url}", file=sys.stderr)
 
-        try:
-            twr = requests.get(media_url, auth=(sid, token))
-            twr.raise_for_status()
-            img = vision.Image(content=twr.content)
-            anns = vision_client.text_detection(image=img).text_annotations
+            # Auth credentials for Twilio to download image
+            sid = os.environ.get("TWILIO_ACCOUNT_SID")
+            token = os.environ.get("TWILIO_AUTH_TOKEN")
 
-            if anns:
-                raw_text = anns[0].description
-                parsed = extract_invoice_data(raw_text)
-                pretty = "\n".join([f"{k}: {v}" for k, v in parsed.items()])
-                if pretty:
-                    resp.message(f"🧾 Here's what I found:\n\n{pretty}")
+            if not sid or not token:
+                resp.message("⚠️ Missing Twilio credentials.")
+                return str(resp)
+
+            # Download and OCR the image
+            try:
+                image_response = requests.get(media_url, auth=(sid, token))
+                image_response.raise_for_status()
+
+                image = vision.Image(content=image_response.content)
+                result = vision_client.text_detection(image=image)
+                annotations = result.text_annotations
+
+                if annotations:
+                    detected_text = annotations[0].description.strip()
+                    print(f"📄 OCR Text: {detected_text}", file=sys.stderr)
+                    resp.message(f"📝 Here's what I read:\n\n{detected_text}")
                 else:
-                    resp.message(f"📝 Raw OCR result:\n\n{raw_text}")
-            else:
-                resp.message("⚠️ I couldn’t detect any text in that image.")
+                    resp.message("🤔 I couldn't detect any text in the image.")
 
-        except Exception as e:
-            resp.message(f"⚠️ Image processing error: {e}")
+            except Exception as img_error:
+                print(f"❌ Error processing image: {img_error}", file=sys.stderr)
+                resp.message("⚠️ Error reading the image. Make sure it's clear and try again.")
 
-    elif body.lower() in ["hi", "hello", "hey", "hola", "yo"]:
-        resp.message("👋 Hey! Send me a photo of an invoice or bill and I’ll extract the data for you.")
+        # Case 2: Text message like "hi", "hello"
+        elif body.lower() in ["hi", "hello", "hey", "hola", "yo"]:
+            resp.message("👋 Hey there! Send me an invoice image and I’ll read it for you.")
 
-    elif body:
-        resp.message(f"🤖 You said: {body}")
+        # Case 3: Any other message
+        elif body:
+            resp.message(f"You said: {body}")
 
-    else:
-        resp.message("📷 Please send me an invoice image and I'll read it for you.")
+        # Case 4: Nothing sent
+        else:
+            resp.message("🤖 Please send me a message or an invoice image to get started.")
 
-    return str(resp)
+        return str(resp)
 
+    except Exception as e:
+        # Catch any global error and respond
+        print(f"🔥 FATAL ERROR: {e}", file=sys.stderr)
+        sys.stderr.flush()
+        return str(MessagingResponse().message("⚠️ Something went wrong. Try again shortly."))
+
+# Flask entry point
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
