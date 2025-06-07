@@ -1,10 +1,11 @@
-from google.cloud import vision
-import os
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/sustained-spark-462115-v9-117f1dfb50a9.json"
-
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import requests
+from google.cloud import vision
+import os
+
+# Set Google Vision credentials path (matches Render secret mount path)
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/sustained-spark-462115-v9-117f1dfb50a9.json"
 
 app = Flask(__name__)
 
@@ -23,8 +24,8 @@ def whatsapp_reply():
         media_content = requests.get(media_url).content
         with open(filename, 'wb') as f:
             f.write(media_content)
-        
-        # ---- OCR code starts here ----
+
+        # OCR with Google Vision
         client = vision.ImageAnnotatorClient()
         with open(filename, "rb") as image_file:
             content = image_file.read()
@@ -33,12 +34,10 @@ def whatsapp_reply():
         texts = response.text_annotations
 
         if texts:
-            full_text = texts[0].description  # This is all the text Google Vision found
+            full_text = texts[0].description
             reply.body("Invoice text extracted:\n" + full_text)
         else:
             reply.body("Sorry, I couldn't read any text from your invoice.")
-        # ---- OCR code ends here ----
-
     elif 'invoice' in incoming_msg:
         reply.body("Sure! Please upload your invoice and I'll analyze it for you.")
     elif 'hello' in incoming_msg or 'hi' in incoming_msg:
@@ -52,4 +51,5 @@ def whatsapp_reply():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000)
+
 
