@@ -1,6 +1,8 @@
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import requests
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/sustained-spark-462115-v9-117f1dfb50a9.json"
+
 
 app = Flask(__name__)
 
