@@ -1,62 +1,73 @@
+import os
+import logging
+import requests
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
-import requests
-import os
+from twilio.rest import Client
 from google.cloud import vision
 
-# --- Load sensitive secrets from environment variables ---
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
-GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_APPLICATION_CREDENTIALS
+# ——— SET UP LOGGING ———
+logging.basicConfig(level=logging.DEBUG)
+log = logging.getLogger(__name__)
 
-# --- Flask app ---
+# ——— GOOGLE VISION CLIENT ———
+# Render will set GOOGLE_APPLICATION_CREDENTIALS to "/etc/secrets/your-file.json"
+# The client library reads that automatically—no need to override it in code.
+vision_client = vision.ImageAnnotatorClient()
+
+# ——— TWILIO CLIENT ———
+twilio_sid   = os.environ["TWILIO_ACCOUNT_SID"]
+twilio_token = os.environ["TWILIO_AUTH_TOKEN"]
+twilio_client = Client(twilio_sid, twilio_token)
+
+# ——— FLASK APP ———
 app = Flask(__name__)
 
-@app.route("/whatsapp", methods=['POST'])
+@app.route("/whatsapp", methods=["POST"])
 def whatsapp_reply():
-    incoming_msg = request.values.get('Body', '').lower()
-    num_media = int(request.values.get('NumMedia', 0))
+    incoming = request.values.get("Body", "").lower()
+    num_media = int(request.values.get("NumMedia", 0))
     resp = MessagingResponse()
-    reply = resp.message()
+    msg  = resp.message()
 
     if num_media > 0:
-        try:
-            media_url = request.values.get('MediaUrl0')
-            media_type = request.values.get('MediaContentType0')
-            file_extension = media_type.split('/')[-1]
-            filename = f"invoice.{file_extension}"
-            media_content = requests.get(media_url).content
-            with open(filename, 'wb') as f:
-                f.write(media_content)
-            # --- OCR PROCESS ---
-            client = vision.ImageAnnotatorClient()
-            with open(filename, "rb") as image_file:
-                content = image_file.read()
-            image = vision.Image(content=content)
-            response = client.text_detection(image=image)
-            texts = response.text_annotations
-            # DEBUG
-            print("==== FULL OCR RESPONSE ====")
-            print(response)
-            print("==== END OCR RESPONSE ====")
-            if texts:
-                full_text = texts[0].description
-                reply.body("Invoice text extracted:\n" + full_text)
-            else:
-                reply.body("Sorry, I couldn't read any text from your invoice.")
-        except Exception as e:
-            reply.body(f"Error processing invoice: {str(e)}")
-    elif 'invoice' in incoming_msg:
-        reply.body("Sure! Please upload your invoice and I'll analyze it for you.")
-    elif 'hello' in incoming_msg or 'hi' in incoming_msg:
-        reply.body("Hi there! 👋 I'm SaveAi — your smart cost-saving assistant. Send me an invoice or ask me to scan expenses.")
-    elif incoming_msg.startswith("how much"):
-        reply.body("SaveAI: Let me fetch your data and get back to you.")
+        # download the first attachment
+        url  = request.values["MediaUrl0"]
+        mtype = request.values["MediaContentType0"].split("/")[-1]
+        fname = f"invoice.{mtype}"
+        content = requests.get(url).content
+
+        with open(fname, "wb") as f:
+            f.write(content)
+        log.debug(f"Saved {fname} ({len(content)} bytes)")
+
+        # send to Vision API
+        with open(fname, "rb") as image_file:
+            image = vision.Image(content=image_file.read())
+
+        ocr_resp = vision_client.text_detection(image=image)
+        log.debug("==== FULL OCR RESPONSE ====\n%s\n==== END OCR ====", ocr_resp)
+
+        if ocr_resp.error.message:
+            log.error("VISION ERROR: %s", ocr_resp.error)
+            msg.body("Error processing invoice: " + ocr_resp.error.message)
+        elif ocr_resp.text_annotations:
+            text = ocr_resp.text_annotations[0].description
+            msg.body("Invoice text extracted:\n" + text)
+        else:
+            msg.body("Sorry, I couldn't read any text from your invoice.")
     else:
-        reply.body("I'm here to help you save money. Send me a keyword like 'invoice' or say 'hi' to begin.")
+        # no media → keyword based
+        if "invoice" in incoming:
+            msg.body("Sure! Please upload your invoice as an attachment.")
+        elif incoming.startswith(("hi","hello")):
+            msg.body("Hi there! 👋 Send me an invoice and I'll scan it for you.")
+        else:
+            msg.body("I'm SaveAi — send me an invoice image and I'll extract the text for you.")
 
     return str(resp), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000)
+    # Render listens on $PORT (default 10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
