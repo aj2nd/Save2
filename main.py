@@ -1,12 +1,16 @@
-import os
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import requests
+import os
 from google.cloud import vision
 
-# Set Google Vision credentials path
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/sustained-spark-462115-v9-117f1dfb50a9.json"
+# --- Load sensitive secrets from environment variables ---
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_APPLICATION_CREDENTIALS
 
+# --- Flask app ---
 app = Flask(__name__)
 
 @app.route("/whatsapp", methods=['POST'])
@@ -17,48 +21,32 @@ def whatsapp_reply():
     reply = resp.message()
 
     if num_media > 0:
-        media_url = request.values.get('MediaUrl0')
-        media_type = request.values.get('MediaContentType0')
-        file_extension = media_type.split('/')[-1]
-        filename = f"invoice.{file_extension}"
-
-        # Download and save the image file
         try:
-            response = requests.get(media_url)
+            media_url = request.values.get('MediaUrl0')
+            media_type = request.values.get('MediaContentType0')
+            file_extension = media_type.split('/')[-1]
+            filename = f"invoice.{file_extension}"
+            media_content = requests.get(media_url).content
             with open(filename, 'wb') as f:
-                f.write(response.content)
-            file_size = os.path.getsize(filename)
-            print(f"DEBUG: Saved {filename} with size: {file_size} bytes")
-
-            # Check file size sanity
-            if file_size < 5000:  # Less than 5KB is probably not valid
-                reply.body("The uploaded image appears too small/corrupted. Please try sending a clearer image or use a different format.")
-                return str(resp), 200
-
-            # OCR using Google Vision API
+                f.write(media_content)
+            # --- OCR PROCESS ---
             client = vision.ImageAnnotatorClient()
             with open(filename, "rb") as image_file:
                 content = image_file.read()
             image = vision.Image(content=content)
             response = client.text_detection(image=image)
-
-            # Debug full OCR response
+            texts = response.text_annotations
+            # DEBUG
             print("==== FULL OCR RESPONSE ====")
             print(response)
             print("==== END OCR RESPONSE ====")
-
-            if response.error.message:
-                reply.body(f"Error processing invoice: {response.error.message}")
+            if texts:
+                full_text = texts[0].description
+                reply.body("Invoice text extracted:\n" + full_text)
             else:
-                texts = response.text_annotations
-                if texts:
-                    full_text = texts[0].description.strip()
-                    reply.body("Invoice text extracted:\n" + full_text)
-                else:
-                    reply.body("Sorry, I couldn't read any text from your invoice.")
+                reply.body("Sorry, I couldn't read any text from your invoice.")
         except Exception as e:
-            print(f"ERROR: {e}")
-            reply.body("There was an error processing your invoice. Please try again with a clear image.")
+            reply.body(f"Error processing invoice: {str(e)}")
     elif 'invoice' in incoming_msg:
         reply.body("Sure! Please upload your invoice and I'll analyze it for you.")
     elif 'hello' in incoming_msg or 'hi' in incoming_msg:
@@ -71,4 +59,4 @@ def whatsapp_reply():
     return str(resp), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=3000)
