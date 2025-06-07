@@ -1,5 +1,5 @@
 Flask
-twilio
 gunicorn
 google-cloud-vision
 requests
+twilio
