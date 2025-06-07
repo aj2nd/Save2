@@ -1,11 +1,16 @@
-from google.cloud import vision
 import os
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import requests
+from requests.auth import HTTPBasicAuth
+from google.cloud import vision
 
-# Path to your secret JSON file on Render
+# Set credentials for Google Vision
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/sustained-spark-462115-v9-117f1dfb50a9.json"
+
+# Twilio credentials (set these as environment variables in Render)
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 
 app = Flask(__name__)
 
@@ -21,15 +26,29 @@ def whatsapp_reply():
         media_type = request.values.get('MediaContentType0')
         file_extension = media_type.split('/')[-1]
         filename = f"invoice.{file_extension}"
-        media_content = requests.get(media_url).content
-        with open(filename, 'wb') as f:
-            f.write(media_content)
+
+        # Download with Twilio Auth
+        response = requests.get(
+            media_url,
+            auth=HTTPBasicAuth(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            stream=True
+        )
+        if response.status_code == 200:
+            with open(filename, 'wb') as f:
+                for chunk in response.iter_content(1024):
+                    f.write(chunk)
+            file_size = os.path.getsize(filename)
+            print(f"DEBUG: Saved {filename} with size: {file_size} bytes")
+        else:
+            reply.body("Error downloading the invoice image. Try again.")
+            return str(resp), 200
+
         try:
             client = vision.ImageAnnotatorClient()
             with open(filename, "rb") as image_file:
                 content = image_file.read()
             image = vision.Image(content=content)
-            # Use document_text_detection for better results on invoices
+            # Use document_text_detection for invoices
             response = client.document_text_detection(image=image)
             texts = response.text_annotations
 
