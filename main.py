@@ -1,10 +1,10 @@
-import os
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import requests
 from google.cloud import vision
+import os
 
-# Set Google credentials for Vision API
+# Set Google Vision credentials (the mount path on Render)
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/sustained-spark-462115-v9-117f1dfb50a9.json"
 
 app = Flask(__name__)
@@ -22,25 +22,28 @@ def whatsapp_reply():
         file_extension = media_type.split('/')[-1]
         filename = f"invoice.{file_extension}"
         media_content = requests.get(media_url).content
+
         with open(filename, 'wb') as f:
             f.write(media_content)
-        
-        # OCR with Google Vision
-        try:
-            client = vision.ImageAnnotatorClient()
-            with open(filename, "rb") as image_file:
-                content = image_file.read()
-            image = vision.Image(content=content)
-            response = client.text_detection(image=image)
-            texts = response.text_annotations
 
-            if texts:
-                full_text = texts[0].description.strip()
-                reply.body("Invoice text extracted:\n" + full_text)
-            else:
-                reply.body("Sorry, I couldn't read any text from your invoice.")
-        except Exception as e:
-            reply.body(f"Error processing invoice: {str(e)}")
+            # ---- OCR code starts here ----
+            try:
+                client = vision.ImageAnnotatorClient()
+                with open(filename, "rb") as image_file:
+                    content = image_file.read()
+                image = vision.Image(content=content)
+                response = client.text_detection(image=image)
+                texts = response.text_annotations
+
+                if texts:
+                    full_text = texts[0].description
+                    reply.body("Invoice text extracted:\n" + full_text)
+                else:
+                    reply.body("Sorry, I couldn't read any text from your invoice.")
+            except Exception as e:
+                reply.body(f"Error processing invoice: {e}")
+            # ---- OCR code ends here ----
+
     elif 'invoice' in incoming_msg:
         reply.body("Sure! Please upload your invoice and I'll analyze it for you.")
     elif 'hello' in incoming_msg or 'hi' in incoming_msg:
