@@ -1,5 +1,4 @@
 import os
-import re
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import requests
@@ -25,6 +24,11 @@ def whatsapp_reply():
 
         with open(filename, 'wb') as f:
             f.write(media_content)
+
+        # Print the file size for debugging
+        file_size = os.path.getsize(filename)
+        print(f"DEBUG: Saved {filename} with size: {file_size} bytes")
+
         try:
             client = vision.ImageAnnotatorClient()
             with open(filename, "rb") as image_file:
@@ -35,7 +39,6 @@ def whatsapp_reply():
 
             if texts and len(texts) > 0:
                 full_text = texts[0].description
-                # DEBUG: Always send the raw OCR output back
                 reply.body("DEBUG OCR OUTPUT:\n" + full_text)
             else:
                 reply.body("Sorry, I couldn't read any text from your invoice.")
