@@ -8,6 +8,9 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/secrets/sustained-spark-462
 
 app = Flask(__name__)
 
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")  # Add to your Render secrets!
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")    # Add to your Render secrets!
+
 @app.route("/whatsapp", methods=['POST'])
 def whatsapp_reply():
     incoming_msg = request.values.get('Body', '').lower()
@@ -20,12 +23,17 @@ def whatsapp_reply():
         media_type = request.values.get('MediaContentType0')
         file_extension = media_type.split('/')[-1]
         filename = f"invoice.{file_extension}"
-        media_content = requests.get(media_url).content
+
+        # Use Twilio credentials to download media
+        response = requests.get(
+            media_url,
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        )
+        media_content = response.content
 
         with open(filename, 'wb') as f:
             f.write(media_content)
 
-        # Print the file size for debugging
         file_size = os.path.getsize(filename)
         print(f"DEBUG: Saved {filename} with size: {file_size} bytes")
 
@@ -39,7 +47,7 @@ def whatsapp_reply():
 
             if texts and len(texts) > 0:
                 full_text = texts[0].description
-                reply.body("DEBUG OCR OUTPUT:\n" + full_text)
+                reply.body("OCR Output:\n" + full_text)
             else:
                 reply.body("Sorry, I couldn't read any text from your invoice.")
         except Exception as e:
