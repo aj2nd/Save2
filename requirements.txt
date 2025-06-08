@@ -1,6 +1,66 @@
-Flask
-gunicorn
-google-cloud-vision
-requests
-twilio
-dateparser
+# Core Framework
+Flask==2.3.3
+gunicorn==21.2.0
+
+# AI & OCR Services
+google-cloud-vision==3.4.5
+requests==2.31.0
+
+# Communication
+twilio==8.10.0
+
+# Data Processing & Parsing
+dateparser==1.1.8
+python-dateutil==2.8.2
+
+# Database & Storage
+sqlite3  # Built-in with Python
+
+# Text Processing & Analysis
+regex==2023.8.8
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.21.1
+
+# Data Structures & Utilities
+dataclasses-json==0.6.1
+typing-extensions==4.8.0
+enum34==1.1.10
+
+# Logging & Monitoring
+structlog==23.2.0
+colorama==0.4.6
+
+# Security & Validation
+cryptography==41.0.7
+validators==0.22.0
+
+# Performance & Optimization
+cachetools==5.3.2
+memory-profiler==0.61.0
+
+# Development & Testing (optional)
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.9.1
+flake8==6.1.0
+
+# Environment Management
+python-dotenv==1.0.0
+
+# Additional Utilities
+pillow==10.1.0  # For image processing
+phonenumbers==8.13.25  # For phone number validation
+email-validator==2.1.0  # For email validation
+
+# Arabic Text Processing
+python-bidi==0.4.2
+arabic-reshaper==3.0.0
+
+# Mathematical Operations
+numpy==1.25.2
+
+# JSON & Data Serialization
+jsonschema==4.19.2
+marshmallow==3.20.1
+
+# Time & Date Handling
