@@ -2,6 +2,9 @@ name: Reorganize Directory Structure
 on:
   workflow_dispatch:  # Manual trigger
 
+permissions:
+  contents: write    # Explicitly set write permissions
+
 jobs:
   reorganize:
     runs-on: ubuntu-latest
@@ -16,7 +19,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          cache: 'pip'
+          # Removed cache configuration
 
       - name: Configure Git
         run: |
@@ -29,7 +32,7 @@ jobs:
           """
           Directory Reorganization Script
           Version: 1.0.0
-          Created: 2025-06-08 22:48:19
+          Created: 2025-06-08 23:07:57
           Author: anandhu723
           """
           
@@ -101,7 +104,7 @@ jobs:
           """
           Directory Structure Verification Script
           Version: 1.0.0
-          Created: 2025-06-08 22:48:19
+          Created: 2025-06-08 23:07:57
           Author: anandhu723
           """
           
@@ -177,7 +180,7 @@ jobs:
         if: steps.check_changes.outputs.changes == 'true'
         run: |
           git add .
-          git commit -m "Reorganize directory structure [automated] - $(date -u +'%Y-%m-%d %H:%M:%S')"
+          git commit -m "Reorganize directory structure [automated] - 2025-06-08 23:07:57"
           git push
 
       - name: Create summary
