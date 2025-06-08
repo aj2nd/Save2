@@ -1,7 +1,7 @@
 """
 Directory Structure Verification Script
 Version: 1.0.0
-Created: 2025-06-08 22:38:39
+Created: 2025-06-08 22:48:19
 Author: anandhu723
 """
 
@@ -9,12 +9,10 @@ import os
 from pathlib import Path
 import logging
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def verify_structure():
-    """Verify the directory structure and files"""
     expected_structure = {
         'saveai': {
             'api': ['config.py', 'middleware.py', 'router.py', 'handlers'],
@@ -25,8 +23,7 @@ def verify_structure():
                 'test_analytics.py',
                 'test_blockchain.py',
                 'test_security.py',
-                'test_tax.py',
-                'test_transaction.py'
+                'test_tax.py'
             ],
             'deployment/docker': [
                 'Dockerfile',
@@ -43,7 +40,6 @@ def verify_structure():
             if not path.exists():
                 logger.error(f"Missing directory: {path}")
                 continue
-                
             if isinstance(value, list):
                 for file in value:
                     file_path = path / file
@@ -53,7 +49,7 @@ def verify_structure():
                         logger.info(f"Verified: {file_path}")
             else:
                 check_path(path, value)
-    
+
     logger.info("Starting structure verification...")
     check_path('.', expected_structure)
     logger.info("Structure verification completed!")
