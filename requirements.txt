@@ -13,9 +13,6 @@ twilio==8.10.0
 dateparser==1.1.8
 python-dateutil==2.8.2
 
-# Database & Storage
-sqlite3  # Built-in with Python
-
 # Text Processing & Analysis
 regex==2023.8.8
 fuzzywuzzy==0.18.0
