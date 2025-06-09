@@ -7,6 +7,10 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: saveai-api
+  POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+  POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+  POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
   
 jobs:
   deploy:
@@ -31,6 +35,13 @@ jobs:
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
+        DOCKER_BUILDKIT: 1
       run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        # Build with secrets
+        docker build \
+          --build-arg POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
+          --build-arg POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
+          --build-arg POSTGRES_DB="${{ secrets.POSTGRES_DB }}" \
+          --build-arg DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+          -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
