@@ -1,4 +1,5 @@
-import os, sys, requests, re, json, sqlite3, hashlib
+import os
+import psycopg2, sys, requests, re, json, sqlite3, hashlib
 from flask import Flask, request, jsonify
 from twilio.twiml.messaging_response import MessagingResponse
 from google.cloud import vision
@@ -82,29 +83,33 @@ class InvoiceData:
             self.extracted_fields = {}
 
 class DatabaseManager:
-    """SQLite database manager for storing all financial data"""
+    """PostgreSQL database manager for storing all financial data"""
     
     def __init__(self, db_path="saveai.db"):
-        self.db_path = db_path
+        self.database_url = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/save_db')
         self.init_database()
     
+    def get_connection(self):
+        """Create a new database connection"""
+        return psycopg2.connect(self.database_url)
+
     def init_database(self):
         """Initialize all database tables"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self.get_connection()
             cursor = conn.cursor()
             
-            # Invoices table - Added status and payment_date
+            # Invoices table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS invoices (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     user_id TEXT NOT NULL,
                     invoice_hash TEXT UNIQUE,
                     invoice_number TEXT,
-                    amount REAL,
-                    subtotal REAL,
-                    vat_amount REAL,
-                    vat_rate REAL,
+                    amount NUMERIC,
+                    subtotal NUMERIC,
+                    vat_amount NUMERIC,
+                    vat_rate NUMERIC,
                     date TEXT,
                     due_date TEXT,
                     vendor_name TEXT,
@@ -112,7 +117,7 @@ class DatabaseManager:
                     category TEXT,
                     description TEXT,
                     currency TEXT DEFAULT 'AED',
-                    confidence REAL,
+                    confidence NUMERIC,
                     needs_review BOOLEAN,
                     raw_text TEXT,
                     line_items TEXT,
@@ -123,42 +128,16 @@ class DatabaseManager:
                 )
             """)
             
-            # Bank Transactions table (New for Reconciliation)
+            # Bank Transactions table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bank_transactions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     user_id TEXT NOT NULL,
                     transaction_date TEXT,
                     description TEXT,
-                    amount REAL,
+                    amount NUMERIC,
                     is_reconciled BOOLEAN DEFAULT FALSE,
-                    matched_invoice_id INTEGER,
-                    FOREIGN KEY (matched_invoice_id) REFERENCES invoices(id)
-                )
-            """)
-
-            # Employees table (New for Payroll)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS employees (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    full_name TEXT NOT NULL,
-                    monthly_salary REAL NOT NULL,
-                    active BOOLEAN DEFAULT TRUE
-                )
-            """)
-            
-            # Payroll Records table (New for Payroll)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS payroll_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    employee_id INTEGER NOT NULL,
-                    pay_period TEXT,
-                    net_salary REAL,
-                    status TEXT,
-                    processed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (employee_id) REFERENCES employees(id)
+                    matched_invoice_id INTEGER REFERENCES invoices(id)
                 )
             """)
 
@@ -166,19 +145,19 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_sessions (
                     user_id TEXT PRIMARY KEY,
-                    total_expenses REAL DEFAULT 0,
+                    total_expenses NUMERIC DEFAULT 0,
                     total_invoices INTEGER DEFAULT 0,
                     last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     preferences TEXT
                 )
             """)
             
-            # Expense categories tracking
+            # Category stats table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS category_stats (
                     user_id TEXT,
                     category TEXT,
-                    total_amount REAL DEFAULT 0,
+                    total_amount NUMERIC DEFAULT 0,
                     invoice_count INTEGER DEFAULT 0,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (user_id, category)
@@ -187,14 +166,10 @@ class DatabaseManager:
             
             conn.commit()
             conn.close()
-            logger.info("Database initialized/validated successfully")
+            logger.info("Database initialized successfully")
             
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
-    
-    # All other database methods from your original code would go here
-    # (save_invoice, get_user_stats, etc.)
-    # For brevity, I'll omit the identical methods and only add new ones.
     def save_invoice(self, user_id: str, invoice_data: InvoiceData) -> bool:
     """Save invoice data to database"""
     try:
