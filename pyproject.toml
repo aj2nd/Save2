@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "save"
+version = "0.1.0"
+description = "WhatsApp-based invoice management system"
+authors = ["anandhu723"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+flask = "^3.0.0"
+twilio = "^8.9.1"
+google-cloud-vision = "^3.4.4"
+sqlalchemy = "^2.0.23"
+python-dateutil = "^2.8.2"
+requests = "^2.31.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
