@@ -371,6 +371,192 @@ class PayrollManager:
 
 # Assume db_manager, parser, and formatter are initialized
 db_manager = DatabaseManager()
+class AdvancedInvoiceParser:
+    """Advanced invoice parser with enhanced text extraction and validation"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        
+    def parse(self, text: str, image_text: str = None) -> InvoiceData:
+        """Parse invoice text and return structured data"""
+        invoice_data = InvoiceData()
+        invoice_data.raw_text = text
+        
+        try:
+            # Extract invoice number
+            invoice_number = self._extract_invoice_number(text)
+            if invoice_number:
+                invoice_data.invoice_number = invoice_number
+            
+            # Extract amount
+            amount = self._extract_amount(text)
+            if amount:
+                invoice_data.amount = amount
+                
+            # Extract dates
+            dates = self._extract_dates(text)
+            if dates.get('invoice_date'):
+                invoice_data.date = dates['invoice_date']
+            if dates.get('due_date'):
+                invoice_data.due_date = dates['due_date']
+                
+            # Extract vendor details
+            vendor_info = self._extract_vendor_info(text)
+            invoice_data.vendor_name = vendor_info.get('name', '')
+            invoice_data.vendor_trn = vendor_info.get('trn', '')
+            invoice_data.vendor_address = vendor_info.get('address', '')
+            
+            # Categorize the invoice
+            invoice_data.category = self._categorize_invoice(text)
+            
+            # Set confidence based on extracted fields
+            invoice_data.confidence = self._calculate_confidence(invoice_data)
+            
+            # Set needs_review flag
+            invoice_data.needs_review = invoice_data.confidence < 0.8
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing invoice: {e}")
+            invoice_data.validation_errors.append(str(e))
+            
+        return invoice_data
+    
+    def _extract_invoice_number(self, text: str) -> str:
+        """Extract invoice number using regex patterns"""
+        patterns = [
+            r'Invoice\s*#?\s*(\w+[-/]?\w+)',
+            r'Invoice Number:?\s*(\w+[-/]?\w+)',
+            r'Bill Number:?\s*(\w+[-/]?\w+)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return ""
+    
+    def _extract_amount(self, text: str) -> float:
+        """Extract total amount from invoice"""
+        patterns = [
+            r'Total:?\s*AED\s*([\d,]+\.?\d*)',
+            r'Amount Due:?\s*AED\s*([\d,]+\.?\d*)',
+            r'Grand Total:?\s*AED\s*([\d,]+\.?\d*)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                amount_str = match.group(1).replace(',', '')
+                try:
+                    return float(amount_str)
+                except ValueError:
+                    continue
+        return 0.0
+    
+    def _extract_dates(self, text: str) -> Dict[str, str]:
+        """Extract invoice and due dates"""
+        dates = {}
+        
+        # Invoice date patterns
+        invoice_patterns = [
+            r'Invoice Date:?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+            r'Date:?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})'
+        ]
+        
+        # Due date patterns
+        due_patterns = [
+            r'Due Date:?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+            r'Payment Due:?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})'
+        ]
+        
+        # Extract invoice date
+        for pattern in invoice_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                dates['invoice_date'] = self._standardize_date(match.group(1))
+                break
+                
+        # Extract due date
+        for pattern in due_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                dates['due_date'] = self._standardize_date(match.group(1))
+                break
+                
+        return dates
+    
+    def _standardize_date(self, date_str: str) -> str:
+        """Convert date string to standard format"""
+        try:
+            parsed_date = dateparser.parse(date_str)
+            if parsed_date:
+                return parsed_date.strftime('%Y-%m-%d')
+        except Exception:
+            pass
+        return date_str
+    
+    def _extract_vendor_info(self, text: str) -> Dict[str, str]:
+        """Extract vendor details from invoice"""
+        vendor_info = {
+            'name': '',
+            'trn': '',
+            'address': ''
+        }
+        
+        # Extract TRN (Tax Registration Number)
+        trn_match = re.search(r'TRN:?\s*(\d{15})', text)
+        if trn_match:
+            vendor_info['trn'] = trn_match.group(1)
+        
+        # TODO: Add more sophisticated vendor name and address extraction
+        # This would need more complex pattern matching or NLP
+        
+        return vendor_info
+    
+    def _categorize_invoice(self, text: str) -> str:
+        """Categorize invoice based on content"""
+        # Simple keyword-based categorization
+        keywords = {
+            ExpenseCategory.MEDICAL_SUPPLIES.value: ['medical', 'medicine', 'pharmacy', 'prescription'],
+            ExpenseCategory.OFFICE_RENT.value: ['rent', 'lease', 'property'],
+            ExpenseCategory.UTILITIES.value: ['electricity', 'water', 'gas', 'utility'],
+            ExpenseCategory.EQUIPMENT.value: ['equipment', 'machine', 'device'],
+            ExpenseCategory.INSURANCE.value: ['insurance', 'coverage', 'policy'],
+            ExpenseCategory.PROFESSIONAL_FEES.value: ['consultation', 'professional', 'service fee'],
+            ExpenseCategory.OFFICE_SUPPLIES.value: ['supplies', 'stationery', 'paper']
+        }
+        
+        text_lower = text.lower()
+        for category, words in keywords.items():
+            if any(word in text_lower for word in words):
+                return category
+                
+        return ExpenseCategory.MISCELLANEOUS.value
+    
+    def _calculate_confidence(self, invoice_data: InvoiceData) -> float:
+        """Calculate confidence score based on extracted fields"""
+        required_fields = {
+            'invoice_number': 0.2,
+            'amount': 0.3,
+            'date': 0.2,
+            'vendor_name': 0.2,
+            'vendor_trn': 0.1
+        }
+        
+        confidence = 0.0
+        
+        if invoice_data.invoice_number:
+            confidence += required_fields['invoice_number']
+        if invoice_data.amount > 0:
+            confidence += required_fields['amount']
+        if invoice_data.date:
+            confidence += required_fields['date']
+        if invoice_data.vendor_name:
+            confidence += required_fields['vendor_name']
+        if invoice_data.vendor_trn:
+            confidence += required_fields['vendor_trn']
+            
+        return confidence
 invoice_parser = AdvancedInvoiceParser()
 response_formatter = ResponseFormatter()
 reconciliation_engine = BankReconciliation()
