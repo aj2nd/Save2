@@ -333,7 +333,55 @@ class DatabaseManager:
         
 # Your existing AdvancedInvoiceParser and ResponseFormatter classes would be here.
 # I'll add the new service classes below.
+class ResponseFormatter:
+    """Formats responses for WhatsApp messages"""
+    
+    def format_invoice_summary(self, invoice: InvoiceData) -> str:
+        """Format invoice details for WhatsApp message"""
+        summary = ["📑 Invoice processed successfully!"]
+        
+        if invoice.invoice_number:
+            summary.append(f"Invoice #: {invoice.invoice_number}")
+        
+        if invoice.amount:
+            summary.append(f"Amount: {invoice.currency} {invoice.amount:,.2f}")
+            
+        if invoice.vendor_name:
+            summary.append(f"Vendor: {invoice.vendor_name}")
+            
+        if invoice.date:
+            summary.append(f"Date: {invoice.date}")
+            
+        if invoice.category:
+            summary.append(f"Category: {invoice.category}")
+            
+        if invoice.needs_review:
+            summary.append("\n⚠️ This invoice needs review.")
+            
+        confidence = invoice.confidence * 100
+        summary.append(f"\nConfidence: {confidence:.1f}%")
+        
+        return "\n".join(summary)
+        
+    def format_monthly_report(self, stats: Dict) -> str:
+        """Format monthly expense report"""
+        report = ["📊 Monthly Expense Report"]
+        
+        if 'total_expenses' in stats:
+            report.append(f"\nTotal Expenses: AED {stats['total_expenses']:,.2f}")
+            
+        if 'total_invoices' in stats:
+            report.append(f"Total Invoices: {stats['total_invoices']}")
+            
+        if 'categories' in stats:
+            report.append("\nExpenses by Category:")
+            for cat in stats['categories']:
+                report.append(f"- {cat['name']}: AED {cat['amount']:,.2f}")
+                
+        return "\n".join(report)
 
+# Add the class right before this comment:
+class BankReconciliation:
 class BankReconciliation:
     """Handles parsing bank statements and matching transactions."""
     
