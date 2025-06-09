@@ -10,6 +10,15 @@ flask = "^3.0.0"
 twilio = "^8.9.1"
 google-cloud-vision = "^3.4.4"
 sqlalchemy = "^2.0.23"
+[tool.poetry.dependencies]
+python = "^3.11"
+flask = "^3.0.0"
+twilio = "^8.9.1"
+google-cloud-vision = "^3.4.4"
+sqlalchemy = "^2.0.23"
+psycopg2-binary = "^2.9.9"  # Add this line here
+python-dateutil = "^2.8.2"
+requests = "^2.31.0"
 python-dateutil = "^2.8.2"
 requests = "^2.31.0"
 
