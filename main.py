@@ -696,11 +696,47 @@ def whatsapp_webhook():
         media_type = incoming_msg.get("MediaContentType0")
         
         # A. Process Invoice Images
-        if "image" in media_type:
-            # ... (your existing image processing logic)
-            # image_content -> ocr_text -> invoice_data -> save_invoice -> format_invoice_summary
-            pass # Placeholder for your existing logic
+        # A. Process Invoice Images
+if "image" in media_type:
+    try:
+        # Download the image
+        response = requests.get(media_url)
+        image_content = response.content
+
+        # Create vision image object
+        image = vision.Image(content=image_content)
+
+        # Perform OCR using Google Vision
+        if vision_client:
+            result = vision_client.text_detection(image=image)
+            texts = result.text_annotations
+
+            if texts:
+                # Extract full text from the first annotation
+                ocr_text = texts[0].description
+                
+                # Parse the text using our invoice parser
+                invoice_data = invoice_parser.parse(ocr_text)
+                
+                # Generate invoice hash to prevent duplicates
+                text_hash = hashlib.md5(ocr_text.encode()).hexdigest()
+                invoice_data.invoice_hash = text_hash
+                
+                # Save to database
+                if db_manager.save_invoice(user_id, invoice_data):
+                    # Format response
+                    summary = response_formatter.format_invoice_summary(invoice_data)
+                    resp.message(summary)
+                else:
+                    resp.message("This invoice has already been processed.")
+            else:
+                resp.message("No text was detected in the image. Please ensure the image is clear and try again.")
+        else:
+            resp.message("Sorry, OCR service is currently unavailable. Please try again later.")
             
+    except Exception as e:
+        logger.error(f"Error processing invoice image: {e}")
+        resp.message("Sorry, there was an error processing your invoice. Please try again.")
         # B. Process Bank Statement CSVs
         elif "csv" in media_type:
             response = requests.get(media_url)
