@@ -195,6 +195,56 @@ class DatabaseManager:
     # All other database methods from your original code would go here
     # (save_invoice, get_user_stats, etc.)
     # For brevity, I'll omit the identical methods and only add new ones.
+    def save_invoice(self, user_id: str, invoice_data: InvoiceData) -> bool:
+    """Save invoice data to database"""
+    try:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Check for duplicate invoice
+        if invoice_data.invoice_hash:
+            cursor.execute("SELECT id FROM invoices WHERE invoice_hash = ?", 
+                         (invoice_data.invoice_hash,))
+            if cursor.fetchone():
+                logger.info("Duplicate invoice detected, skipping")
+                return False
+        
+        # Insert invoice data
+        cursor.execute("""
+            INSERT INTO invoices (
+                user_id, invoice_hash, invoice_number, amount, subtotal,
+                vat_amount, vat_rate, date, due_date, vendor_name,
+                vendor_trn, category, description, currency,
+                confidence, needs_review, raw_text, line_items
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id, invoice_data.invoice_hash, invoice_data.invoice_number,
+            invoice_data.amount, invoice_data.subtotal, invoice_data.vat_amount,
+            invoice_data.vat_rate, invoice_data.date, invoice_data.due_date,
+            invoice_data.vendor_name, invoice_data.vendor_trn, invoice_data.category,
+            invoice_data.description, invoice_data.currency, invoice_data.confidence,
+            invoice_data.needs_review, invoice_data.raw_text,
+            json.dumps(invoice_data.line_items) if invoice_data.line_items else None
+        ))
+        
+        # Update category stats
+        cursor.execute("""
+            INSERT INTO category_stats (user_id, category, total_amount, invoice_count)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(user_id, category) DO UPDATE SET
+            total_amount = total_amount + ?,
+            invoice_count = invoice_count + 1,
+            last_updated = CURRENT_TIMESTAMP
+        """, (user_id, invoice_data.category, invoice_data.amount, invoice_data.amount))
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"Successfully saved invoice {invoice_data.invoice_number}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error saving invoice: {e}")
+        return False
 
     def save_bank_transactions(self, user_id: str, transactions: List[Dict]) -> int:
         """Saves a list of bank transactions to the database."""
