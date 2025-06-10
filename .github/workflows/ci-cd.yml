@@ -11,13 +11,24 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    
+    env:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: saveai_test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/saveai_test
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: test_secret_key
+      BLOCKCHAIN_NODE_URL: http://localhost:8545
+      SMART_CONTRACT_ADDRESS: "0x0000000000000000000000000000000000000000"
+    
     services:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: saveai_test
         ports:
           - 5432:5432
         options: >-
@@ -61,19 +72,22 @@ jobs:
           key: ${{ runner.os }}-venv-${{ hashFiles('**/poetry.lock') }}
           
       - name: Install dependencies
-        run: poetry install --no-interaction --no-root
-        
-      - name: Install project
+        if: steps.poetry-cache.outputs.cache-hit != 'true'
         run: poetry install --no-interaction
         
+      - name: Wait for PostgreSQL
+        run: |
+          while ! nc -z localhost 5432; do
+            echo "Waiting for PostgreSQL to start..."
+            sleep 1
+          done
+        timeout-minutes: 1
+        
+      - name: Run database migrations
+        run: |
+          poetry run alembic upgrade head
+        
       - name: Run tests
-        env:
-          DATABASE_URL: postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.POSTGRES_DB }}
-          REDIS_URL: redis://localhost:6379/0
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-          BLOCKCHAIN_NODE_URL: ${{ secrets.BLOCKCHAIN_NODE_URL }}
-          SMART_CONTRACT_ADDRESS: ${{ secrets.SMART_CONTRACT_ADDRESS }}
-          PYTHONPATH: ${{ github.workspace }}
         run: |
           poetry run pytest tests/ -v --cov=saveai --cov-report=xml
           
@@ -110,13 +124,13 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build \
-            --build-arg POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
-            --build-arg POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
-            --build-arg POSTGRES_DB="${{ secrets.POSTGRES_DB }}" \
+            --build-arg POSTGRES_USER=postgres \
+            --build-arg POSTGRES_PASSWORD=postgres \
+            --build-arg POSTGRES_DB=saveai \
             --build-arg DATABASE_URL="${{ secrets.DATABASE_URL }}" \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
-            .
+            -f saveai/deployment/docker/Dockerfile .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
