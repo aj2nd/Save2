@@ -1,0 +1,113 @@
+name: CD Pipeline
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.check.outputs.should_deploy }}
+    steps:
+      - id: check
+        run: |
+          if [[ "${{ github.event.workflow_run.conclusion }}" == "success" ]]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+          fi
+
+  deploy:
+    needs: verify
+    if: needs.verify.outputs.should_deploy == 'true'
+    name: Deploy to ECR
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: me-central-1
+      
+      - name: Verify AWS Credentials
+        run: |
+          aws sts get-caller-identity
+          if [ $? -ne 0 ]; then
+            echo "::error::Failed to verify AWS credentials"
+            exit 1
+          fi
+          
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        
+      - name: Verify ECR Login
+        run: |
+          if [ -z "${{ steps.login-ecr.outputs.registry }}" ]; then
+            echo "::error::Failed to login to ECR"
+            exit 1
+          fi
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: saveai-api
+          IMAGE_TAG: ${{ github.sha }}
+          TIMESTAMP: "2025-06-10 15:57:14"
+          AUTHOR: "aj2nd"
+        run: |
+          # Verify build arguments
+          if [ -z "$ECR_REGISTRY" ] || [ -z "$ECR_REPOSITORY" ] || [ -z "$IMAGE_TAG" ]; then
+            echo "::error::Missing required environment variables"
+            exit 1
+          fi
+          
+          docker build \
+            --build-arg POSTGRES_USER=postgres \
+            --build-arg POSTGRES_PASSWORD=postgres \
+            --build-arg POSTGRES_DB=saveai \
+            --build-arg DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            --label "org.opencontainers.image.created=${TIMESTAMP}" \
+            --label "org.opencontainers.image.authors=${AUTHOR}" \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            -f saveai/deployment/docker/Dockerfile .
+            
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+      - name: Verify image push
+        run: |
+          aws ecr describe-images \
+            --repository-name saveai-api \
+            --image-ids imageTag=${{ github.sha }}
+          if [ $? -ne 0 ]; then
+            echo "::error::Failed to verify image push to ECR"
+            exit 1
+          fi
+          
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster saveai-cluster \
+            --service saveai-api-service \
+            --force-new-deployment
+            
+      - name: Verify deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster saveai-cluster \
+            --services saveai-api-service
