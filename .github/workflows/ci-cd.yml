@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -14,9 +15,9 @@ jobs:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: save_db
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
         ports:
           - 5432:5432
         options: >-
@@ -36,7 +37,7 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -47,18 +48,34 @@ jobs:
         run: |
           curl -sSL https://install.python-poetry.org | python3 -
           
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+          
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v3
+        id: poetry-cache
+        with:
+          path: ./.venv
+          key: ${{ runner.os }}-venv-${{ hashFiles('**/poetry.lock') }}
+          
       - name: Install dependencies
-        run: poetry install
+        run: poetry install --no-interaction --no-root
+        
+      - name: Install project
+        run: poetry install --no-interaction
         
       - name: Run tests
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/save_db
+          DATABASE_URL: postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ secrets.POSTGRES_DB }}
           REDIS_URL: redis://localhost:6379/0
-          SECRET_KEY: test_secret_key
-          BLOCKCHAIN_NODE_URL: http://localhost:8545
-          SMART_CONTRACT_ADDRESS: "0x1234567890abcdef"
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          BLOCKCHAIN_NODE_URL: ${{ secrets.BLOCKCHAIN_NODE_URL }}
+          SMART_CONTRACT_ADDRESS: ${{ secrets.SMART_CONTRACT_ADDRESS }}
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          poetry run pytest tests/ --cov=saveai --cov-report=xml
+          poetry run pytest tests/ -v --cov=saveai --cov-report=xml
           
       - name: Upload coverage
         uses: codecov/codecov-action@v3
@@ -73,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -86,19 +103,22 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Create ECR repository if not exists
-        run: |
-          aws ecr describe-repositories --repository-names saveai-api || \
-          aws ecr create-repository --repository-name saveai-api
-          
       - name: Build and push Docker image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: saveai-api
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker build \
+            --build-arg POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
+            --build-arg POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
+            --build-arg POSTGRES_DB="${{ secrets.POSTGRES_DB }}" \
+            --build-arg DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
       - name: Update ECS service
         run: |
